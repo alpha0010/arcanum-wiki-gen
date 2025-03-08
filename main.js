@@ -17,12 +17,19 @@ function toTitleCase(str) {
 }
 
 function toDisplayName(row) {
-  return toTitleCase(row.name ?? row.id);
+  return toTitleCase(row.actname ?? row.name ?? row.id);
 }
 
 const symbolMap = new Map([
+  ['classes', '🎓'],
+  ['enchants', '✨'],
+  ['furniture', '🪑'],
+  ['homes', '🏠'],
+  ['potions', '🧪'],
   ['skills', '📔'],
   ['spells', '☄'],
+  ['tasks', '📋'],
+  ['upgrades', '🔧'],
 ]);
 
 function toDisplaySymbol(row) {
@@ -36,7 +43,8 @@ function findMatches(query, data, limit) {
   for (const row of data) {
     if (
       row.id.includes(query) ||
-      (row?.name != null && row.name.toLowerCase().includes(query))
+      (row?.name != null && row.name.toLowerCase().includes(query)) ||
+      (row?.actname != null && row.actname.toLowerCase().includes(query))
     ) {
       results.push(row);
       if (results.length >= limit) {
@@ -97,6 +105,19 @@ function improveToWikiLabel(str) {
   return improveMap.get(str) ?? str;
 }
 
+function genFlavorWikiText(row) {
+  const descriptions = [];
+  if (row?.desc) {
+    descriptions.push(row.desc);
+  }
+  if (row?.flavor) {
+    descriptions.push(`''${row.flavor}''`);
+  }
+  return descriptions.length > 0
+    ? `\n\n<blockquote>\n${descriptions.join('\n\n')}\n</blockquote>`
+    : '';
+}
+
 function guessSpellTarget(spell) {
   if (spell?.attack?.targets === 'enemies') {
     return 'Enemies';
@@ -104,7 +125,16 @@ function guessSpellTarget(spell) {
   if (spell?.attack?.targets === 'allies') {
     return 'Allies';
   }
-  if (spell?.summon != null) {
+  if (spell?.attack?.targets === 'all') {
+    return 'All';
+  }
+  if (
+    spell?.summon != null ||
+    (spell?.keywords?.target?.length === 1 &&
+      spell.keywords.target[0] === 'ally' &&
+      spell?.keywords?.targets?.length === 1 &&
+      spell.keywords.targets[0] === 'single')
+  ) {
     return 'Ally';
   }
   if (
@@ -176,16 +206,7 @@ function renderSpellWikiText(spell, data) {
   }
   output += '\n}}';
 
-  const descriptions = [];
-  if (spell?.desc != null) {
-    descriptions.push(spell.desc);
-  }
-  if (spell?.flavor != null) {
-    descriptions.push(`''${spell.flavor}''`);
-  }
-  if (descriptions.length > 0) {
-    output += `\n\n<blockquote>\n${descriptions.join('\n\n')}\n</blockquote>`;
-  }
+  output += genFlavorWikiText(spell);
 
   output += '\n\n== Requirements ==';
   output += `\nrequire: ${spell.require}`;
@@ -209,9 +230,18 @@ function renderSpellWikiText(spell, data) {
     const summons = [];
     for (const row of spell.summon) {
       const summon = findById(row.id, data.monsters);
-      summons.push(
-        `\n=== ${toDisplayName(summon)} ===\n<blockquote>\nTODO\n</blockquote>`,
-      );
+      let sumTxt = `\n=== ${toDisplayName(summon)} ===`;
+      sumTxt += genFlavorWikiText(summon);
+      sumTxt += `\n\n* Level: ${summon.level}`;
+      sumTxt += `\n* Life: ${summon.hp}`;
+      if (summon?.regen != null) {
+        sumTxt += `\n* Regen: ${summon.regen}/s`;
+      }
+      sumTxt += `\n* Defense: ${summon.defense}`;
+      if (summon?.dodge != null) {
+        sumTxt += `\n* Dodge: ${summon.dodge}`;
+      }
+      summons.push(sumTxt);
     }
     output += `\n\n== Summoned Ally ==${summons.join('\n')}`;
   }
@@ -221,7 +251,18 @@ function renderSpellWikiText(spell, data) {
 async function main() {
   const apiBase = 'https://mathiashjelm.gitlab.io/arcanum/data/';
 
-  const dataTypes = ['monsters', 'skills', 'spells'];
+  const dataTypes = [
+    'classes',
+    'enchants',
+    'furniture',
+    'homes',
+    'monsters',
+    'potions',
+    'skills',
+    'spells',
+    'tasks',
+    'upgrades',
+  ];
   const data = {};
   for (const field of dataTypes) {
     const response = await fetch(`${apiBase}${field}.json`);
@@ -270,17 +311,26 @@ async function main() {
       'https://theoryofmagic.miraheze.org/wiki/' +
       displayName.replaceAll(' ', '_');
     aLink.textContent = displayName;
-    if (row.meta.type === 'skills') {
-      preWiki.textContent = 'TODO: Skill';
-    } else if (row.meta.type === 'spells') {
+    if (row.meta.type === 'spells') {
       preWiki.textContent = renderSpellWikiText(row, data);
+    } else {
+      preWiki.textContent = 'TODO';
     }
   };
 
-  const searchData = data.skills.concat(data.spells);
+  const searchData = data.classes.concat(
+    data.enchants,
+    data.furniture,
+    data.homes,
+    data.potions,
+    data.skills,
+    data.spells,
+    data.tasks,
+    data.upgrades,
+  );
 
   inputQuery.addEventListener('input', (e) => {
-    const matches = findMatches(e.target.value, searchData, 10);
+    const matches = findMatches(e.target.value, searchData, 20);
     const matchRows = [];
     for (const match of matches) {
       const row = document.createElement('li');
